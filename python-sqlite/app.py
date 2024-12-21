@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 import sqlite3
+import bleach
+import re
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///students.db'
@@ -16,6 +18,20 @@ class Student(db.Model):
 
     def __repr__(self):
         return f'<Student {self.name}>'
+    
+# Fungsi untuk validasi nama
+def validate_name(name):
+    return bool(re.match("^[A-Za-z ]+$", name))
+
+# Fungsi untuk validasi angka positif
+def validate_age(age):
+    return age > 0
+
+# Fungsi untuk validasi grade
+def validate_grade(grade):
+    valid_grades = ['A', 'AB', 'B', 'BC', 'C', 'D', 'E']
+    return grade in valid_grades
+
 
 @app.route('/')
 def index():
@@ -23,27 +39,44 @@ def index():
     students = db.session.execute(text('SELECT * FROM student')).fetchall()
     return render_template('index.html', students=students)
 
-@app.route('/add', methods=['POST'])
+@app.route('/add', methods=['POST', 'GET'])
 def add_student():
-    name = request.form['name']
-    age = request.form['age']
-    grade = request.form['grade']
-    
+    errors = []  # List untuk menyimpan pesan error
 
-    connection = sqlite3.connect('instance/students.db')
-    cursor = connection.cursor()
+    if request.method == 'POST':
+        name = request.form['name']
+        age = request.form['age']
+        grade = request.form['grade']
 
-    # RAW Query
-    # db.session.execute(
-    #     text("INSERT INTO student (name, age, grade) VALUES (:name, :age, :grade)"),
-    #     {'name': name, 'age': age, 'grade': grade}
-    # )
-    # db.session.commit()
-    query = f"INSERT INTO student (name, age, grade) VALUES ('{name}', {age}, '{grade}')"
-    cursor.execute(query)
-    connection.commit()
-    connection.close()
-    return redirect(url_for('index'))
+        # Konversi usia ke integer
+        try:
+            age = int(age)
+        except ValueError:
+            errors.append("Usia harus berupa angka positif.")
+        # Validasi input
+        if not validate_name(name):
+            errors.append("Nama hanya boleh mengandung huruf A-Z atau a-z.")
+        if not validate_age(age):
+            errors.append("Usia harus lebih besar dari 0.")
+        if not validate_grade(grade):
+            errors.append("Grade tidak valid. Pilih dari A, AB, B, BC, C, D, E.")
+        # Jika tidak ada error, simpan data
+        if not errors:
+            safe_name = bleach.clean(name)  # Sanitasi input
+            connection = sqlite3.connect('instance/students.db')
+            cursor = connection.cursor()
+
+            # Tetap gunakan RAW query seperti sebelumnya
+            query = f"INSERT INTO student (name, age, grade) VALUES ('{safe_name}', {age}, '{grade}')"
+            cursor.execute(query)
+            connection.commit()
+            connection.close()
+            return redirect(url_for('index'))
+
+    # Jika ada error, tampilkan kembali halaman form dengan error
+    students = db.session.execute(text('SELECT * FROM student')).fetchall()
+    return render_template('index.html', errors=errors, students=students)
+
 
 
 @app.route('/delete/<string:id>') 
